@@ -3,6 +3,7 @@ using Esri.ArcGISRuntime.Geometry;
 using Esri.ArcGISRuntime.Mapping;
 using Esri.ArcGISRuntime.UI.Controls;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,16 +12,20 @@ using System.Reflection.Metadata;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Xml.Linq;
 
 namespace DisplayAMap
 {
     internal class DataHandler
     {
-        internal static FeatureLayer _layer;
+        internal static FeatureLayer _trainLayer;
+        internal static FeatureLayer _trackLayer;
         private GeodatabaseFeatureTable? _featureTable;
         private Geodatabase? _geodatabase;
         private string? _gdbPath;
         private string? _directoryPath;
+        private string? _tracklayerPath;
+        private string? _trackFeatureTable;
         public class TrainInfo
         {
             public int TreinNummer { get; set; }
@@ -75,6 +80,146 @@ namespace DisplayAMap
             //    }
         }
 
+        public async Task CreateGeodatabase()
+        {
+            // Create a new randomly named directory for the geodatabase.
+            _directoryPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CreateMobileGeodatabase");
+            if (!Directory.Exists(_directoryPath))
+            {
+                Directory.CreateDirectory(_directoryPath);
+            }
+
+            // Create the geodatabase file.
+            _gdbPath = Path.Combine(_directoryPath, "LocationHistory.geodatabase");
+
+            // Delete existing file if present from previous sample run.
+            // Check if the geodatabase file exists
+            if (File.Exists(_gdbPath))
+            {
+                _geodatabase = await Geodatabase.OpenAsync(_gdbPath);
+
+                // Check if the feature table "locationhistory" exists
+                GeodatabaseFeatureTable existingTable = _geodatabase.GeodatabaseFeatureTables.FirstOrDefault(table => table.TableName == "LocationHistory");
+
+                if (existingTable != null)
+                {
+                    // Delete the feature table if it exists
+                    await _geodatabase.DeleteTableAsync(existingTable.TableName);
+                }
+            }
+            else
+            {
+                _geodatabase = await Geodatabase.CreateAsync(_gdbPath);
+            }
+
+            // Construct a table description which stores features as points on a map.
+            var tableDescription = new TableDescription("LocationHistory", SpatialReferences.Wgs84, GeometryType.Point)
+            {
+                HasAttachments = false,
+                HasM = false,
+                HasZ = false
+            };
+
+            // Set up the fields for the table:
+            // FieldType.OID is the primary key of the SQLite table.
+            // FieldType.Date is a date column used to store a Calendar date.
+            // FieldDescriptions can be a SHORT, INTEGER, GUID, FLOAT, DOUBLE, DATE, TEXT, OID, GLOBALID, BLOB, GEOMETRY, RASTER, or XML.
+            tableDescription.FieldDescriptions.Add(new FieldDescription("oid", FieldType.OID));
+            tableDescription.FieldDescriptions.Add(new FieldDescription("collection_timestamp", FieldType.Date));
+            tableDescription.FieldDescriptions.Add(new FieldDescription("treinNummer", FieldType.Int32));
+            tableDescription.FieldDescriptions.Add(new FieldDescription("ritId", FieldType.Text));
+            tableDescription.FieldDescriptions.Add(new FieldDescription("snelheid", FieldType.Float64));
+            tableDescription.FieldDescriptions.Add(new FieldDescription("richting", FieldType.Float64));
+
+            // Add a new table to the geodatabase by creating one from the table description.
+            _featureTable = await _geodatabase.CreateTableAsync(tableDescription);
+
+        }
+
+        public async Task<FeatureLayer> CreateOrFetchTracks()
+        {
+            FeatureTable featureTable;
+
+            _directoryPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "CreateMobileGeodatabase", "locationhistory.geodatabase");
+
+            // Open the geodatabase
+            Geodatabase geodatabase = await Geodatabase.OpenAsync(_directoryPath);
+
+            // Retrieve the FeatureLayer based on the table name or create a new one;
+            if ((featureTable = geodatabase.GeodatabaseFeatureTables.FirstOrDefault(table => table.TableName == "TrainTracks")) == null)
+            {
+
+                // Construct a table description which stores features as points on a map.
+                var tableDescription = new TableDescription("TrainTracks", SpatialReferences.Wgs84, GeometryType.Polyline)
+                {
+                    HasAttachments = false,
+                    HasM = false,
+                    HasZ = false
+                };
+
+                // Set up the fields for the table:
+                // FieldType.OID is the primary key of the SQLite table.
+                // FieldType.Date is a date column used to store a Calendar date.
+                // FieldDescriptions can be a SHORT, INTEGER, GUID, FLOAT, DOUBLE, DATE, TEXT, OID, GLOBALID, BLOB, GEOMETRY, RASTER, or XML.
+                tableDescription.FieldDescriptions.Add(new FieldDescription("oid", FieldType.OID));
+                tableDescription.FieldDescriptions.Add(new FieldDescription("from", FieldType.Text));
+                tableDescription.FieldDescriptions.Add(new FieldDescription("to", FieldType.Text));
+
+                FeatureTable trackFeatureTable = await _geodatabase.CreateTableAsync(tableDescription);
+
+                string geoJsonString = await NSAPICalls.GetTrackData();
+
+                // Deserialize the GeoJSON string to a JObject
+                JObject geoJsonObject = JsonConvert.DeserializeObject<JObject>(geoJsonString);
+
+                // Check if 'features' exists within the 'payload' object
+                if (geoJsonObject["payload"]?["features"] is JArray features)
+                {
+                    // Do something with the features...
+                    foreach (JObject feature in features)
+                    {
+                        // Access properties, geometry, etc.
+                        JObject properties = (JObject)feature["properties"];
+                        JObject geometry = (JObject)feature["geometry"];
+
+                        // Get the geometry type
+                        string geometryType = geometry["type"].ToString();
+
+                        // Check if the geometry type is LineString
+                        if (geometryType.Equals("LineString", StringComparison.OrdinalIgnoreCase))
+                        {
+                            // Handle LineString geometry
+                            JArray coordinates = (JArray)geometry["coordinates"];
+                            Polyline polyline = ConvertGeoJsonLineStringToEsriPolyline(coordinates);
+                            // Now you can use 'polyline' as your geometry
+
+                            // Create a new feature and set its attributes and geometry
+                            Feature newFeature = trackFeatureTable.CreateFeature();
+
+                            // Set geometry
+                            newFeature.Geometry = polyline;
+
+                            // Set attributes
+                            foreach (var property in properties)
+                            {
+                                newFeature.SetAttributeValue(property.Key, property.Value.ToString());
+                            }
+
+                            // Add the feature to the feature table
+                            await trackFeatureTable.AddFeatureAsync(newFeature);
+                        }
+                    }
+                }
+                return _trackLayer = new FeatureLayer(trackFeatureTable) { Name = "Tracks" };
+            }
+            else
+            {
+                featureTable = geodatabase.GeodatabaseFeatureTables.FirstOrDefault(table => table.TableName == "TrainTracks");
+
+                return new FeatureLayer(featureTable);
+            }
+        }
+
         public async Task<FeatureLayer> CreateTrainIcons(string trainInfo)
         {
             RootObject? rootObject = JsonConvert.DeserializeObject<RootObject>(trainInfo);
@@ -102,51 +247,22 @@ namespace DisplayAMap
                     MessageBox.Show(ex.Message, ex.GetType().Name, MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
-            return _layer = new FeatureLayer(_featureTable) { Name = "Treintjes" };
+            return _trainLayer = new FeatureLayer(_featureTable) { Name = "Treintjes" };
         }
 
-        public async Task CreateGeodatabase()
+        private Polyline ConvertGeoJsonLineStringToEsriPolyline(JArray coordinates)
         {
-            // Create a new randomly named directory for the geodatabase.
-            _directoryPath = Path.Combine(Environment.ExpandEnvironmentVariables("%TEMP%"), "CreateMobileGeodatabase", Guid.NewGuid().ToString());
-            if (!Directory.Exists(_directoryPath))
+            var pointList = new List<MapPoint>();
+
+            foreach (var coord in coordinates)
             {
-                Directory.CreateDirectory(_directoryPath);
+                double x = (double)coord[0];
+                double y = (double)coord[1];
+                MapPoint mapPoint = new MapPoint(x, y, SpatialReferences.Wgs84);
+                pointList.Add(mapPoint);
             }
 
-            // Create the geodatabase file.
-            _gdbPath = Path.Combine(_directoryPath, "LocationHistory.geodatabase");
-
-            // Delete existing file if present from previous sample run.
-            if (File.Exists(_gdbPath))
-            {
-                File.Delete(_gdbPath);
-            }
-
-            _geodatabase = await Geodatabase.CreateAsync(_gdbPath);
-
-            // Construct a table description which stores features as points on a map.
-            var tableDescription = new TableDescription("LocationHistory", SpatialReferences.Wgs84, GeometryType.Point)
-            {
-                HasAttachments = false,
-                HasM = false,
-                HasZ = false
-            };
-
-            // Set up the fields for the table:
-            // FieldType.OID is the primary key of the SQLite table.
-            // FieldType.Date is a date column used to store a Calendar date.
-            // FieldDescriptions can be a SHORT, INTEGER, GUID, FLOAT, DOUBLE, DATE, TEXT, OID, GLOBALID, BLOB, GEOMETRY, RASTER, or XML.
-            tableDescription.FieldDescriptions.Add(new FieldDescription("oid", FieldType.OID));
-            tableDescription.FieldDescriptions.Add(new FieldDescription("collection_timestamp", FieldType.Date));
-            tableDescription.FieldDescriptions.Add(new FieldDescription("treinNummer", FieldType.Int32));
-            tableDescription.FieldDescriptions.Add(new FieldDescription("ritId", FieldType.Text));
-            tableDescription.FieldDescriptions.Add(new FieldDescription("snelheid", FieldType.Float64));
-            tableDescription.FieldDescriptions.Add(new FieldDescription("rchting", FieldType.Float64));
-
-            // Add a new table to the geodatabase by creating one from the table description.
-            _featureTable = await _geodatabase.CreateTableAsync(tableDescription);
-
+            return new Polyline(pointList);
         }
     }
 }

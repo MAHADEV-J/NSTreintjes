@@ -25,7 +25,8 @@ namespace DisplayAMap
     internal class MapViewModel : INotifyPropertyChanged
     {
         private Timer _repeatingTaskTimer;
-        internal static FeatureLayer _layer;
+        internal static FeatureLayer _trackLayer;
+        internal static FeatureLayer _trainLayer;
         public DataHandler _data = new DataHandler();
         public ClickHandler _click = new ClickHandler();
 
@@ -39,13 +40,15 @@ namespace DisplayAMap
         {
             Map = new Map(BasemapStyle.ArcGISTopographic);
             await _data.CreateGeodatabase();
-            _layer = await _data.CreateTrainIcons(trainInfo);
-            Map.OperationalLayers.Add(_layer);
+            _trainLayer = await _data.CreateTrainIcons(trainInfo);
+            _trackLayer = await _data.CreateOrFetchTracks();
+            Map.OperationalLayers.Add(_trackLayer);
+            Map.OperationalLayers.Add(_trainLayer);
             _mainMapView = CopyMainMapView.Copy;
             MainMapView.GeoViewTapped += (sender, e) => _click.MyFeatureLayer_GeoViewTapped(sender, e, MainMapView, Map);
             // To display the map, set the MapViewModel.Map property, which is bound to the map view.
             this.Map = Map;
-            //_repeatingTaskTimer = new Timer(state => handler.KeepUpdatingTrains(state, _layer), null, 0, 5000);
+            //_repeatingTaskTimer = new Timer(state => handler.KeepUpdatingTrains(state, _trainLayer), null, 0, 5000);
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

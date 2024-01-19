@@ -2,7 +2,6 @@
 using Esri.ArcGISRuntime.Mapping;
 using Esri.ArcGISRuntime.Mapping.Popups;
 using Esri.ArcGISRuntime.UI.Controls;
-using ArcGIS.Desktop;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -11,6 +10,13 @@ using System.Threading.Tasks;
 using System.Windows.Input;
 using System.Xml.Linq;
 using static System.Runtime.InteropServices.JavaScript.JSType;
+using System.Windows;
+using Esri.ArcGISRuntime.Location;
+using System.Windows.Controls;
+using System.Windows.Media;
+using Esri.ArcGISRuntime.Geometry;
+using Esri.ArcGISRuntime.UI;
+using Esri.ArcGISRuntime.Symbology;
 
 namespace DisplayAMap
 {
@@ -18,6 +24,8 @@ namespace DisplayAMap
     {
         public async void MyFeatureLayer_GeoViewTapped(object? sender, GeoViewInputEventArgs e, MapView mainMapView, Map map)
         {
+            double x;
+            double y;
             // Identify features at the clicked location
             IReadOnlyList<IdentifyLayerResult> identifyResults = await mainMapView.IdentifyLayersAsync(e.Position, 5, false);
             IdentifyLayerResult result = identifyResults.FirstOrDefault();
@@ -34,43 +42,48 @@ namespace DisplayAMap
                         // Check if the clicked feature belongs to the FeatureLayer
                         if (clickedFeature != null && clickedFeature.FeatureTable == featureLayer.FeatureTable)
                         {
-                            IDictionary<string, object?> attributes = clickedFeature.Attributes;
-
-                            // Display attribute information (you can use a dialog, tooltip, etc.)
-                            DisplayAttributeInformation(attributes, mainMapView, map);
+                            CreateNewGraphicsOverlay(clickedFeature, mainMapView);
+                        }
+                        if (mainMapView.GraphicsOverlays.Count > 1)
+                        {
+                            mainMapView.GraphicsOverlays.RemoveAt(0);
                         }
                     }
                 }
             }
+
         }
 
-        private void DisplayAttributeInformation(IDictionary<string, object> attributes, MapView mainMapView, Map map)
+        public static void CreateNewGraphicsOverlay(Feature feature, MapView mainMapView) 
         {
-            // Implement the logic to display attribute information (e.g., update UI elements)
-            // You can use WPF controls, Windows Forms, or any other UI framework you are using
-            // For simplicity, you can use Console.WriteLine to print the information in the console.
-            foreach (var attribute in attributes)
-            {
-                // Create a PopupDefinition object
-                var popupDef = new PopupDefinition() {
-                    Append = true;
-                    FieldName = attribute.Key,
-                    Label = attribute.Value.ToString(),
-                    IsVisible = true
+            GraphicsOverlay graphicsOverlay = new GraphicsOverlay();
 
-                };
-                // Get the command to open the attribute table
-                var openTableBtnCmd = FrameworkApplication.GetPlugInWrapper("esri_editing_table_openTablePaneButton") as ICommand;
-                var test = map.OfType<MapMember>().
-                if (openTableBtnCmd != null)
-                {
-                    // Let ArcGIS Pro do the work for us
-                    if (openTableBtnCmd.CanExecute(null))
-                    {
-                        openTableBtnCmd.Execute(null);
-                    }
-                }
-            }
+            // Create a text symbol to display attribute information
+            IDictionary<string, object?> arr = feature.Attributes;
+            TextSymbol textSymbol = new TextSymbol
+            {
+                Color = System.Drawing.Color.Black,
+                Size = 12,
+                FontFamily = "Arial",
+                Text = "Richting:" + arr["richting"] + "\n Snelheid: " + Math.Round((double)arr["snelheid"], 2) + "\nTreinnummer: " + arr["treinNummer"] + "\n Rit id: " + arr["ritId"],
+                OffsetY = 55,
+                Angle = 0
+            };
+
+            // Create a text graphic with attribute information
+            Graphic textGraphic = new Graphic(feature.Geometry, textSymbol);
+            SimpleMarkerSymbol markerSymbol = new SimpleMarkerSymbol(SimpleMarkerSymbolStyle.Square, System.Drawing.Color.FromArgb(160, 255, 0, 255), 110)
+            {
+                OffsetY = 55,
+            };
+            Graphic pointGraphic = new Graphic(feature.Geometry, markerSymbol);
+            graphicsOverlay.Graphics.Add(pointGraphic);
+
+            // Add the text graphic to the overlay
+            graphicsOverlay.Graphics.Add(textGraphic);
+
+            // Add the overlay to the map view
+            mainMapView.GraphicsOverlays.Add(graphicsOverlay);
         }
     }
 }
