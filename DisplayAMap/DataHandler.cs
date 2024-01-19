@@ -13,6 +13,11 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Xml.Linq;
+using System.Timers;
+using Esri.ArcGISRuntime.UI;
+using System.Diagnostics;
+using static DisplayAMap.DataHandler;
+using Esri.ArcGISRuntime.Symbology;
 
 namespace DisplayAMap
 {
@@ -26,6 +31,9 @@ namespace DisplayAMap
         private string? _directoryPath;
         private string? _tracklayerPath;
         private string? _trackFeatureTable;
+        private System.Timers.Timer _timer = new System.Timers.Timer();
+        int fetchCounter = 0;
+
         public class TrainInfo
         {
             public int TreinNummer { get; set; }
@@ -48,37 +56,136 @@ namespace DisplayAMap
             public Payload Payload { get; set; }
         }
 
-        public void KeepUpdatingTrains(object? state, FeatureLayer layer)
+        public async Task KeepUpdatingTrains(object? state, FeatureLayer layer, FeatureLayer trackLayer, MapView mainMapView)
         {
-            //using (Table table)
-            //    foreach (Feature feature in layer)
-            //    {
-            //        // Assuming you have a feature layer named "iconLayer" and a feature with fields "Latitude", "Longitude", "Speed", and "Direction".
-            //        // var feature = iconLayer.GetFeature(featureId);
-            //        var currentPoint = feature.GetShape() as MapPoint;
+            await Task.Run(async () =>
+            {
+                Stopwatch stopwatch = new Stopwatch();
+                stopwatch.Start();
+                if (fetchCounter == 5)
+                {
+                    // Process the train data and update the features
+                    await ProcessAndDisplayTrainData(layer);
+                }
 
-            //        // Retrieve speed and direction from the feature's attributes
-            //        double speedKmh = Convert.ToDouble(feature.GetAttributeValue("Speed"));
-            //        double direction = Convert.ToDouble(feature.GetAttributeValue("Direction"));
+                // Create a query to get all features
+                QueryParameters queryParameters = new QueryParameters();
+                queryParameters.WhereClause = "1=1"; // Retrieve all features
 
-            //        // Convert speed from km/h to m/s
-            //        double speedMs = speedKmh * 1000 / 3600;
+                // Get features in the layer
+                var features = await _trainLayer.FeatureTable.QueryFeaturesAsync(queryParameters);
 
-            //        // Calculate the new coordinates based on speed and direction
-            //        double distance = speedMs; // Assuming constant speed over a short time interval
-            //        double angleInRadians = direction * Math.PI / 180.0; // Convert direction to radians
+                foreach (var feature in features)
+                {
+                    double millisecondsElapsed = stopwatch.ElapsedMilliseconds;
+                    double timeFactor = millisecondsElapsed / 10000.0;
 
-            //        double deltaX = distance * Math.Sin(angleInRadians);
-            //        double deltaY = distance * Math.Cos(angleInRadians);
+                    double speedKmPerHour = (double)feature.Attributes["snelheid"];
+                    double speedMetersPerSecond = speedKmPerHour / 3.6;
 
-            //        // Update the current point with the new coordinates
-            //        MapPoint newPoint = new MapPoint(currentPoint.X + deltaX, currentPoint.Y + deltaY, currentPoint.SpatialReference);
-            //        feature.SetShape(newPoint);
+                    double angleInRadians = (Math.PI / 180.0) * (double)feature.Attributes["richting"];
 
-            //        // Refresh the display
-            //        //mapView?.Refresh();
-            //    }
+                    double deltaX = (speedMetersPerSecond * timeFactor) * Math.Cos(angleInRadians);
+                    double deltaY = (speedMetersPerSecond * timeFactor) * Math.Sin(angleInRadians);
+
+                    Geometry currentGeometry = feature.Geometry;
+                    Geometry newGeometry = GeometryEngine.Move(currentGeometry, deltaX, deltaY);
+
+                    // Query features from the track layer directly without an additional function
+                    var trackFeatures = await trackLayer.FeatureTable.QueryFeaturesAsync(new QueryParameters { WhereClause = "1=1" });
+
+                    MapPoint nearestPointOnTracks = null;
+                    double minDistance = double.MaxValue;
+
+                    // Assuming tracks are represented as Polyline geometries
+                    foreach (var trackFeature in trackFeatures)
+                    {
+                        if (trackFeature.Geometry is Polyline polyline)
+                        {
+                            foreach (var vertex in polyline.Parts.SelectMany(part => part.Points))
+                            {
+                                double distance = GeometryEngine.Distance(newGeometry as MapPoint, vertex);
+
+                                if (distance < minDistance)
+                                {
+                                    minDistance = distance;
+                                    nearestPointOnTracks = vertex;
+                                }
+                            }
+                        }
+                    }
+                    feature.Geometry = nearestPointOnTracks;
+                    if (feature.Attributes["clicked"]?.ToString() == "true")
+                    {
+                        await mainMapView.Dispatcher.InvokeAsync(async () =>
+                        {
+                            GraphicsOverlay? graphicsOverlay = mainMapView.GraphicsOverlays.FirstOrDefault();
+                            GraphicCollection graphics = graphicsOverlay.Graphics;
+                            // Iterate through all graphics in the overlay
+                            for (int i = 0; i < graphics.Count + 1; i++)
+                            {
+                                graphics[i].Geometry = feature.Geometry;
+                            }
+                            graphicsOverlay.Graphics.Remove(graphics[1]);
+                            graphicsOverlay.Graphics.Remove(graphics[0]);
+                            graphicsOverlay.Graphics.Add(graphics[0]);
+                            graphicsOverlay.Graphics.Add(graphics[1]);
+                        });
+                    }
+                    stopwatch.Restart();
+
+                    // Use Dispatcher.InvokeAsync to update UI components
+                    await layer.FeatureTable.UpdateFeatureAsync(feature);
+                }
+                if (fetchCounter == 5)
+                {
+                    fetchCounter = -1;
+                }
+            });
+            fetchCounter++;
         }
+
+        public async Task ProcessAndDisplayTrainData(FeatureLayer layer)
+        {
+            string trainInfo = NSAPICalls.GetTrainData();
+            RootObject? rootObject = JsonConvert.DeserializeObject<RootObject>(trainInfo);
+
+            FeatureTable featureTable = layer.FeatureTable;
+
+            for (int i = 0; i < rootObject.Payload.Treinen.Count; i++)
+            {
+                var attributes = new Dictionary<string, object?>();
+                attributes["treinNummer"] = (Int32)rootObject.Payload.Treinen[i].TreinNummer;
+                attributes["ritId"] = rootObject.Payload.Treinen[i].RitId;
+                attributes["snelheid"] = (float)rootObject.Payload.Treinen[i].Snelheid; ;
+                attributes["richting"] = rootObject.Payload.Treinen[i].Richting;
+                attributes["clicked"] = "false";
+
+                double lat = Convert.ToDouble(rootObject.Payload.Treinen[i].Lat);
+                double lng = Convert.ToDouble(rootObject.Payload.Treinen[i].Lng);
+                MapPoint pointGeometry = new MapPoint(lng, lat, SpatialReferences.Wgs84);
+
+                QueryParameters query = new QueryParameters
+                {
+                    WhereClause = $"treinNummer = " + rootObject.Payload.Treinen[i].TreinNummer
+                };
+
+                var result = await featureTable.QueryFeaturesAsync(query);
+                if (result != null)
+                {
+                    foreach (var feature in result)
+                    {
+                        feature.Geometry = pointGeometry;
+                        foreach (var attribute in attributes)
+                        {
+                            feature.SetAttributeValue(attribute.Key, attribute.Value);
+                        }
+                        await layer.FeatureTable.UpdateFeatureAsync(feature);
+                    }
+                }
+            }
+        }
+
 
         public async Task CreateGeodatabase()
         {
@@ -130,6 +237,7 @@ namespace DisplayAMap
             tableDescription.FieldDescriptions.Add(new FieldDescription("ritId", FieldType.Text));
             tableDescription.FieldDescriptions.Add(new FieldDescription("snelheid", FieldType.Float64));
             tableDescription.FieldDescriptions.Add(new FieldDescription("richting", FieldType.Float64));
+            tableDescription.FieldDescriptions.Add(new FieldDescription("clicked", FieldType.Text));
 
             // Add a new table to the geodatabase by creating one from the table description.
             _featureTable = await _geodatabase.CreateTableAsync(tableDescription);
@@ -204,7 +312,6 @@ namespace DisplayAMap
                             {
                                 newFeature.SetAttributeValue(property.Key, property.Value.ToString());
                             }
-
                             // Add the feature to the feature table
                             await trackFeatureTable.AddFeatureAsync(newFeature);
                         }
@@ -222,16 +329,16 @@ namespace DisplayAMap
 
         public async Task<FeatureLayer> CreateTrainIcons(string trainInfo)
         {
+
             RootObject? rootObject = JsonConvert.DeserializeObject<RootObject>(trainInfo);
             for (int i = 0; i < rootObject.Payload.Treinen.Count; i++)
             {
                 var attributes = new Dictionary<string, object?>();
                 attributes["treinNummer"] = (Int32)rootObject.Payload.Treinen[i].TreinNummer;
                 attributes["ritId"] = rootObject.Payload.Treinen[i].RitId;
-                attributes["lat"] = rootObject.Payload.Treinen[i].Lat;
-                attributes["lng"] = rootObject.Payload.Treinen[i].Lng;
                 attributes["snelheid"] = (float)rootObject.Payload.Treinen[i].Snelheid; ;
                 attributes["richting"] = rootObject.Payload.Treinen[i].Richting;
+                attributes["clicked"] = "false";
 
                 double lat = Convert.ToDouble(rootObject.Payload.Treinen[i].Lat);
                 double lng = Convert.ToDouble(rootObject.Payload.Treinen[i].Lng);
@@ -247,7 +354,18 @@ namespace DisplayAMap
                     MessageBox.Show(ex.Message, ex.GetType().Name, MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
-            return _trainLayer = new FeatureLayer(_featureTable) { Name = "Treintjes" };
+
+            // Get the base directory of the application
+            string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
+
+            // Combine the base directory with the relative path to your custom icon
+            string iconRelativePath = "TrainIcon.png";
+            string iconPath = Path.Combine(baseDirectory, iconRelativePath);
+
+            PictureMarkerSymbol customSymbol = new PictureMarkerSymbol(new Uri(iconPath));
+            // Create a SimpleRenderer with the custom symbol
+            SimpleRenderer renderer = new SimpleRenderer(customSymbol);
+            return _trainLayer = new FeatureLayer(_featureTable) { Name = "Treintjes", Renderer = renderer };
         }
 
         private Polyline ConvertGeoJsonLineStringToEsriPolyline(JArray coordinates)
@@ -266,4 +384,5 @@ namespace DisplayAMap
         }
     }
 }
+
 

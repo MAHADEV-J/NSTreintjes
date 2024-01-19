@@ -48,7 +48,9 @@ namespace DisplayAMap
             MainMapView.GeoViewTapped += (sender, e) => _click.MyFeatureLayer_GeoViewTapped(sender, e, MainMapView, Map);
             // To display the map, set the MapViewModel.Map property, which is bound to the map view.
             this.Map = Map;
-            //_repeatingTaskTimer = new Timer(state => handler.KeepUpdatingTrains(state, _trainLayer), null, 0, 5000);
+
+            // Everything is prepared, time to kick off the main repeating function responsible for making the trains move
+            SetupRepeatingTaskTimer();
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -88,6 +90,29 @@ namespace DisplayAMap
                 _mainMapView = value;
                 // Perform any additional setup or binding logic if needed
             }
+        }
+
+        private readonly SemaphoreSlim _updateSemaphore = new SemaphoreSlim(1, 1);
+
+        private void SetupRepeatingTaskTimer()
+        {
+            _repeatingTaskTimer = new Timer(
+                async state =>
+                {
+                    await _updateSemaphore.WaitAsync();
+                    try
+                    {
+                        await _data.KeepUpdatingTrains(state, _trainLayer, _trackLayer, MainMapView);
+                    }
+                    finally
+                    {
+                        _updateSemaphore.Release();
+                    }
+                },
+                null,
+                0,
+                10000
+            );
         }
     }
 }

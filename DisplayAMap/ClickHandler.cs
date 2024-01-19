@@ -36,18 +36,28 @@ namespace DisplayAMap
                     // Check if there are any identification results
                     if (result != null)
                     {
-                        // Get the clicked feature
+                        var features = await featureLayer.FeatureTable.QueryFeaturesAsync(new QueryParameters() { WhereClause = "1=1" });
+
                         Feature clickedFeature = result.GeoElements.First() as Feature;
+                        foreach (var feature in features)
+                        {
+                            feature.Attributes["clicked"] = "false";
+                            await featureLayer.FeatureTable.UpdateFeatureAsync(feature);
+                        }
+                        GraphicsOverlay graphicsOverlay = mainMapView.GraphicsOverlays.FirstOrDefault();
+                        // Get the clicked feature
 
                         // Check if the clicked feature belongs to the FeatureLayer
                         if (clickedFeature != null && clickedFeature.FeatureTable == featureLayer.FeatureTable)
                         {
                             CreateNewGraphicsOverlay(clickedFeature, mainMapView);
+                            clickedFeature.SetAttributeValue("clicked", "true");
                         }
                         if (mainMapView.GraphicsOverlays.Count > 1)
                         {
                             mainMapView.GraphicsOverlays.RemoveAt(0);
                         }
+                        await featureLayer.FeatureTable.UpdateFeatureAsync(clickedFeature);
                     }
                 }
             }
