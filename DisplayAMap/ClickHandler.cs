@@ -10,12 +10,10 @@ namespace DisplayAMap
     {
         public async void MyFeatureLayer_GeoViewTapped(object? sender, GeoViewInputEventArgs e, MapView mainMapView, Map map)
         {
-            double x;
-            double y;
             // Identify features at the clicked location
             IReadOnlyList<IdentifyLayerResult> identifyResults = await mainMapView.IdentifyLayersAsync(e.Position, 5, false);
-            IdentifyLayerResult result = identifyResults.FirstOrDefault();
-            foreach (Layer layer in mainMapView.Map.AllLayers)
+            IdentifyLayerResult? result = identifyResults.FirstOrDefault();
+            foreach (Layer? layer in mainMapView.Map.AllLayers)
             {
                 if (layer.Name == "Treintjes" && layer is FeatureLayer featureLayer)
                 {
@@ -24,14 +22,12 @@ namespace DisplayAMap
                     {
                         var features = await featureLayer.FeatureTable.QueryFeaturesAsync(new QueryParameters() { WhereClause = "1=1" });
 
-                        Feature clickedFeature = result.GeoElements.First() as Feature;
+                        Feature? clickedFeature = result.GeoElements.First() as Feature;
                         foreach (var feature in features)
                         {
                             feature.Attributes["clicked"] = "false";
                             await featureLayer.FeatureTable.UpdateFeatureAsync(feature);
                         }
-                        GraphicsOverlay graphicsOverlay = mainMapView.GraphicsOverlays.FirstOrDefault();
-                        // Get the clicked feature
 
                         // Check if the clicked feature belongs to the FeatureLayer
                         if (clickedFeature != null && clickedFeature.FeatureTable == featureLayer.FeatureTable)
@@ -61,7 +57,7 @@ namespace DisplayAMap
                 Color = System.Drawing.Color.Black,
                 Size = 12,
                 FontFamily = "Arial",
-                Text = "Richting:" + arr["richting"] + "\n Snelheid: " + Math.Round((double)arr["snelheid"], 2) + "\nTreinnummer: " + arr["treinNummer"] + "\n Rit id: " + arr["ritId"],
+                Text = "Richting: " + arr["richting"] + "\n Snelheid: " + Math.Round((double)arr["snelheid"], 2) + "\nTreinnummer: " + arr["treinNummer"] + "\n Rit id: " + arr["ritId"],
                 OffsetY = 55,
                 Angle = 0
             };
@@ -73,9 +69,11 @@ namespace DisplayAMap
                 OffsetY = 55,
             };
             Graphic pointGraphic = new Graphic(feature.Geometry, markerSymbol);
+            pointGraphic.Attributes["Type"] = "Table";
             graphicsOverlay.Graphics.Add(pointGraphic);
 
             // Add the text graphic to the overlay
+            textGraphic.Attributes["Type"] = "Text";
             graphicsOverlay.Graphics.Add(textGraphic);
 
             // Add the overlay to the map view

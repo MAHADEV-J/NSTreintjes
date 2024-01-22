@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Esri.ArcGISRuntime.UI.Controls;
 using static DisplayAMap.MainWindow;
+using Esri.ArcGISRuntime.Data;
 
 
 namespace DisplayAMap
@@ -11,9 +12,10 @@ namespace DisplayAMap
     internal class MapViewModel : INotifyPropertyChanged
     {
         private Timer _repeatingTaskTimer;
-        internal static FeatureLayer _trackLayer;
-        internal static FeatureLayer _trainLayer;
+        internal static FeatureLayer? _tracks;
+        internal static FeatureLayer? _trains;
         public DataHandler _data = new DataHandler();
+        public LayerHandler _layer = new LayerHandler();
         public ClickHandler _click = new ClickHandler();
 
 
@@ -25,11 +27,11 @@ namespace DisplayAMap
         private async void SetupMap(string trainInfo)
         {
             Map = new Map(BasemapStyle.ArcGISTopographic);
-            await _data.CreateGeodatabase();
-            _trainLayer = await _data.CreateTrainIcons(trainInfo);
-            _trackLayer = await _data.CreateOrFetchTracks();
-            Map.OperationalLayers.Add(_trackLayer);
-            Map.OperationalLayers.Add(_trainLayer);
+            await _layer.CreateOrPurgeGeodatabase();
+            _trains = await _data.ProcessTrainInfo(trainInfo, null);
+            _tracks = await _layer.CreateOrFetchTracks();
+            Map.OperationalLayers.Add(_tracks);
+            Map.OperationalLayers.Add(_trains);
             _mainMapView = CopyMainMapView.Copy;
             MainMapView.GeoViewTapped += (sender, e) => _click.MyFeatureLayer_GeoViewTapped(sender, e, MainMapView, Map);
             // To display the map, set the MapViewModel.Map property, which is bound to the map view.
@@ -82,13 +84,14 @@ namespace DisplayAMap
 
         private void SetupRepeatingTaskTimer()
         {
+            QueryParameters queryParameters = new QueryParameters() { WhereClause = "1=1" };
             _repeatingTaskTimer = new Timer(
                 async state =>
                 {
                     await _updateSemaphore.WaitAsync();
                     try
                     {
-                        await _data.KeepUpdatingTrains(state, _trainLayer, _trackLayer, MainMapView);
+                        await _data.KeepUpdatingTrains(state, _trains ,_trains.FeatureTable.QueryFeaturesAsync(queryParameters).Result, _tracks.FeatureTable.QueryFeaturesAsync(queryParameters).Result, MainMapView);
                     }
                     finally
                     {
