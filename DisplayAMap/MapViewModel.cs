@@ -1,22 +1,8 @@
-﻿using Esri.ArcGISRuntime.Geometry;
-using Esri.ArcGISRuntime.Mapping;
-using Esri.ArcGISRuntime.Symbology;
+﻿using Esri.ArcGISRuntime.Mapping;
 using Esri.ArcGISRuntime.UI;
-using Esri.ArcGISRuntime.Portal;
-using System.Threading.Tasks;
-using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Text;
-using System.Threading.Tasks;
-using Newtonsoft.Json;
 using Esri.ArcGISRuntime.UI.Controls;
-using Esri.ArcGISRuntime.Data;
-using Esri.ArcGISRuntime.Tasks.Offline;
-using System.IO;
-using System.Windows;
 using static DisplayAMap.MainWindow;
 
 

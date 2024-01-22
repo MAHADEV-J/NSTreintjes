@@ -4,19 +4,10 @@ using Esri.ArcGISRuntime.Mapping;
 using Esri.ArcGISRuntime.UI.Controls;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Reflection.Metadata;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows;
-using System.Xml.Linq;
-using System.Timers;
 using Esri.ArcGISRuntime.UI;
 using System.Diagnostics;
-using static DisplayAMap.DataHandler;
 using Esri.ArcGISRuntime.Symbology;
 
 namespace DisplayAMap
@@ -139,7 +130,7 @@ namespace DisplayAMap
                 }
                 if (fetchCounter == 5)
                 {
-                    fetchCounter = -1;
+                    fetchCounter = 0;
                 }
             });
             fetchCounter++;
