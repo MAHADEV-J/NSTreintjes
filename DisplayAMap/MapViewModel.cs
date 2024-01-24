@@ -14,13 +14,17 @@ namespace DisplayAMap
         private Timer _repeatingTaskTimer;
         internal static FeatureLayer? _tracks;
         internal static FeatureLayer? _trains;
-        public DataHandler _data = new DataHandler();
-        public LayerHandler _layer = new LayerHandler();
-        public ClickHandler _click = new ClickHandler();
-
+        public DataHandler _data;
+        public LayerHandler _layer;
+        public ClickHandler _click;
+        public QueryParameters _query;
 
         public MapViewModel()
         {
+            _data = new DataHandler();
+            _layer = new LayerHandler();
+            _click = new ClickHandler();
+            _query = new QueryParameters() { WhereClause = "1=1" };
             SetupMap(NSAPICalls.GetTrainData());
         }
 
@@ -28,7 +32,7 @@ namespace DisplayAMap
         {
             Map = new Map(BasemapStyle.ArcGISTopographic);
             await _layer.CreateOrPurgeGeodatabase();
-            _trains = await _data.ProcessTrainInfo(trainInfo, null);
+            _trains = await _data.ProcessTrainInfo(trainInfo, null, null);
             _tracks = await _layer.CreateOrFetchTracks();
             Map.OperationalLayers.Add(_tracks);
             Map.OperationalLayers.Add(_trains);
@@ -84,14 +88,13 @@ namespace DisplayAMap
 
         private void SetupRepeatingTaskTimer()
         {
-            QueryParameters queryParameters = new QueryParameters() { WhereClause = "1=1" };
             _repeatingTaskTimer = new Timer(
                 async state =>
                 {
                     await _updateSemaphore.WaitAsync();
                     try
                     {
-                        await _data.KeepUpdatingTrains(state, _trains ,_trains.FeatureTable.QueryFeaturesAsync(queryParameters).Result, _tracks.FeatureTable.QueryFeaturesAsync(queryParameters).Result, MainMapView);
+                        await _data.KeepUpdatingTrains(state, _trains, _trains.FeatureTable.QueryFeaturesAsync(_query).Result, _tracks.FeatureTable.QueryFeaturesAsync(_query).Result, MainMapView);
                     }
                     finally
                     {

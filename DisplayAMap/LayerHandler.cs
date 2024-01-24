@@ -95,12 +95,17 @@ namespace DisplayAMap
             // FieldType.Date is a date column used to store a Calendar date.
             // FieldDescriptions can be a SHORT, INTEGER, GUID, FLOAT, DOUBLE, DATE, TEXT, OID, GLOBALID, BLOB, GEOMETRY, RASTER, or XML.
             tableDescription.FieldDescriptions.Add(new FieldDescription("oid", FieldType.OID));
-            tableDescription.FieldDescriptions.Add(new FieldDescription("collection_timestamp", FieldType.Date));
             tableDescription.FieldDescriptions.Add(new FieldDescription("treinNummer", FieldType.Int32));
             tableDescription.FieldDescriptions.Add(new FieldDescription("ritId", FieldType.Text));
             tableDescription.FieldDescriptions.Add(new FieldDescription("snelheid", FieldType.Float64));
             tableDescription.FieldDescriptions.Add(new FieldDescription("richting", FieldType.Float64));
             tableDescription.FieldDescriptions.Add(new FieldDescription("clicked", FieldType.Text));
+            tableDescription.FieldDescriptions.Add(new FieldDescription("delayInSeconds", FieldType.Int32));
+            tableDescription.FieldDescriptions.Add(new FieldDescription("plannedTime", FieldType.Text));  // Assuming PlannedTime is a date
+            tableDescription.FieldDescriptions.Add(new FieldDescription("actualTime", FieldType.Text));   // Assuming ActualTime is a date
+            tableDescription.FieldDescriptions.Add(new FieldDescription("cancelled", FieldType.Text)); // Assuming Cancelled is a boolean
+            tableDescription.FieldDescriptions.Add(new FieldDescription("crowdForecast", FieldType.Text));
+            tableDescription.FieldDescriptions.Add(new FieldDescription("numberOfSeats", FieldType.Int32));
 
             // Add a new table to the geodatabase by creating one from the table description.
             _featureTable = await _geodatabase.CreateTableAsync(tableDescription);

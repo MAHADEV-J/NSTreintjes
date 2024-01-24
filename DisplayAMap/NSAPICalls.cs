@@ -1,24 +1,26 @@
 ﻿using System.Net.Http;
 using System.Windows;
 using System.Net;
+using Esri.ArcGISRuntime.Data;
 
 namespace DisplayAMap
 {
     class NSAPICalls
     {
         private static readonly HttpClient httpClient = new HttpClient();
-
+        private static HttpRequestMessage CreateHttpRequestMessage()
+        {
+            HttpRequestMessage httpRequest = new HttpRequestMessage();
+            httpRequest.Headers.Add("Ocp-Apim-Subscription-Key", "c109e8eea0a242e0be8a92566437793c");
+            return httpRequest;
+        }
         public static string GetTrainData()
         {
             // Attempt the API call up to 3 times
             for (int attempt = 1; attempt <= 3; attempt++)
             {
-                HttpRequestMessage httpRequest = new HttpRequestMessage(HttpMethod.Get, "https://gateway.apiportal.ns.nl/virtual-train-api/api/vehicle");
-
-                if (!httpRequest.Headers.Any())
-                {
-                    httpRequest.Headers.Add("Ocp-Apim-Subscription-Key", "c109e8eea0a242e0be8a92566437793c");
-                }
+                HttpRequestMessage httpRequest = CreateHttpRequestMessage();
+                httpRequest.RequestUri = new Uri("https://gateway.apiportal.ns.nl/virtual-train-api/api/vehicle");
 
                 // Send GET request
                 HttpResponseMessage response = httpClient.SendAsync(httpRequest).Result;
@@ -47,12 +49,8 @@ namespace DisplayAMap
             // Attempt the API call up to 3 times
             for (int attempt = 1; attempt <= 3; attempt++)
             {
-                HttpRequestMessage httpRequest = new HttpRequestMessage(HttpMethod.Get, "https://gateway.apiportal.ns.nl//Spoorkaart-API/api/v1/spoorkaart");
-
-                if (!httpRequest.Headers.Any())
-                {
-                    httpRequest.Headers.Add("Ocp-Apim-Subscription-Key", "c109e8eea0a242e0be8a92566437793c");
-                }
+                HttpRequestMessage httpRequest = CreateHttpRequestMessage();
+                httpRequest.RequestUri = new Uri("https://gateway.apiportal.ns.nl//Spoorkaart-API/api/v1/spoorkaart");
 
                 // Send GET request
                 HttpResponseMessage response = httpClient.SendAsync(httpRequest).Result;
@@ -74,6 +72,17 @@ namespace DisplayAMap
             MessageBox.Show($"Error: No data received after 3 attempts. The application will now close.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             Application.Current.Shutdown();
             return null;
+        }
+
+        public static async Task<string> GetTimetableData(string trainNumber)
+        {
+            HttpRequestMessage httpRequest = CreateHttpRequestMessage();
+            httpRequest.RequestUri = new Uri("https://gateway.apiportal.ns.nl/reisinformatie-api/api/v2/journey?train=" + trainNumber);
+
+            // Send GET request
+            HttpResponseMessage response = httpClient.SendAsync(httpRequest).Result;
+
+            return await response.Content.ReadAsStringAsync();
         }
     }
 }

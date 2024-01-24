@@ -9,6 +9,8 @@ using System.Windows;
 using Esri.ArcGISRuntime.UI;
 using System.Diagnostics;
 using Esri.ArcGISRuntime.Symbology;
+using static DisplayAMap.DataHandlerSupportClasses;
+using System.Linq;
 
 namespace DisplayAMap
 {
@@ -18,28 +20,6 @@ namespace DisplayAMap
         internal static GeodatabaseFeatureTable? _featureTable;
         internal static Geodatabase? _geodatabase;
         int fetchCounter = 0;
-
-        public class TrainInfo
-        {
-            public int? TreinNummer { get; set; }
-            public string? RitId { get; set; }
-            public double? Lat { get; set; }
-            public double? Lng { get; set; }
-            public double? Snelheid { get; set; }
-            public double? Richting { get; set; }
-            public double? HorizontaleNauwkeurigheid { get; set; }
-            public string? Type { get; set; }
-            public string? Bron { get; set; }
-        }
-
-        public class Payload
-        {
-            public List<TrainInfo>? Treinen { get; set; }
-        }
-        public class RootObject
-        {
-            public Payload? Payload { get; set; }
-        }
 
         public async Task KeepUpdatingTrains(object? state, FeatureLayer trainLayer, FeatureQueryResult trainFeatures, FeatureQueryResult trackFeatures, MapView mapView)
         {
@@ -51,23 +31,28 @@ namespace DisplayAMap
                 if (fetchCounter == 5)
                 {
                     // Process the train data and update the features
-                    await ProcessTrainInfo(NSAPICalls.GetTrainData(), mapView);
+                    await ProcessTrainInfo(NSAPICalls.GetTrainData(), mapView, trainLayer);
                 }
                 else
                 {
-                    foreach (var feature in trainFeatures)
-                    {
-                        feature.Geometry = AdjustTrainToTrack(trackFeatures, CalculateTrainMovement(feature, stopwatch));
+// Materialize trainFeatures into a list
+            List<Feature> trainFeaturesList = trainFeatures.ToList();
 
-                        if (ClickedFeature(feature))
-                        {
-                            await AdjustGraphics(feature, mapView);
-                        }
-                        stopwatch.Restart();
+            Feature? featureClicked = ClickedFeature(trainFeatures);
+            foreach (var feature in trainFeaturesList)
+            {
+                feature.Geometry = AdjustTrainToTrack(trackFeatures, CalculateTrainMovement(feature, stopwatch));
 
-                        // Use Dispatcher.InvokeAsync to update UI components
-                        await trainLayer.FeatureTable.UpdateFeatureAsync(feature);
-                    }
+                if (featureClicked != null && featureClicked == feature)
+                {
+                    await AdjustGraphics(feature, mapView);
+                }
+
+                stopwatch.Restart();
+            }
+
+            // Use Dispatcher.InvokeAsync to update UI components
+            await trainLayer.FeatureTable.UpdateFeaturesAsync(trainFeaturesList);
                 }
                 if (fetchCounter == 5)
                 {
@@ -75,6 +60,85 @@ namespace DisplayAMap
                 }
             });
             fetchCounter++;
+        }
+
+        public async Task<FeatureLayer> ProcessTrainInfo(string trainInfo, MapView? mapView, FeatureLayer? trainLayer)
+        {
+            Feature? feature;
+            FeatureQueryResult? trainFeatures = trainLayer?.FeatureTable?.QueryFeaturesAsync(new QueryParameters() { WhereClause = "1=1" }).Result;
+            Feature? featureClicked = (trainFeatures == null) ? null : ClickedFeature(trainFeatures);
+            RootObject? rootObject = JsonConvert.DeserializeObject<RootObject>(trainInfo);
+
+            var attributesMapping = new Dictionary<string, Func<int, object?>>
+            {
+                ["treinNummer"] = i => (Int32?)rootObject.Payload.Treinen[i].TreinNummer,
+                ["ritId"] = i => rootObject.Payload.Treinen[i].RitId,
+                ["snelheid"] = i => (double?)rootObject.Payload.Treinen[i].Snelheid,
+                ["richting"] = i => rootObject.Payload.Treinen[i].Richting
+            };
+
+            for (int i = 0; i < rootObject.Payload.Treinen.Count; i++)
+            {
+                double lat = Convert.ToDouble(rootObject.Payload.Treinen[i].Lat);
+                double lng = Convert.ToDouble(rootObject.Payload.Treinen[i].Lng);
+                MapPoint pointGeometry = new MapPoint(lng, lat, SpatialReferences.Wgs84);
+
+
+                var timetable = await ProcessTimetableInfo(await NSAPICalls.GetTimetableData(rootObject?.Payload.Treinen[i].TreinNummer.ToString()));
+
+                attributesMapping = attributesMapping
+                    .Concat(timetable.Where(kv => !attributesMapping.ContainsKey(kv.Key)))
+                    .ToDictionary(kv => kv.Key, kv => kv.Value);
+
+                var attributes = attributesMapping.ToDictionary(kv => kv.Key, kv => kv.Value(i));
+
+                if (trainLayer == null)
+                {
+                    // Layer doesn't exist, create new features
+                    feature = _featureTable.CreateFeature(attributes, pointGeometry);
+                    feature.SetAttributeValue("clicked", "false");
+
+                    // Add the feature to the feature table.
+                    await _featureTable.AddFeatureAsync(feature);
+                }
+                else
+                {
+                    // Layer exists, update existing features
+                    QueryParameters query = new QueryParameters
+                    {
+                        WhereClause = $"treinNummer = {rootObject.Payload.Treinen[i].TreinNummer}"
+                    };
+
+                    var result = await _featureTable.QueryFeaturesAsync(query);
+
+                    feature = result.FirstOrDefault();
+
+                    if (feature != null)
+                    {
+                        foreach (var attribute in attributes)
+                        {
+                            feature.Attributes[attribute.Key] = attribute.Value;
+                        }
+                        feature.Geometry = pointGeometry;
+                        if (featureClicked == null);
+                        {
+                            if (featureClicked.Attributes["oid"] == feature.Attributes["oid"])
+                            {
+                                await AdjustGraphics(feature, mapView);
+                            }
+                        }
+                        await trainLayer.FeatureTable.UpdateFeatureAsync(feature);
+                    }
+                }
+            }
+            if (trainLayer == null)
+            {
+                return await LayerHandler.CreateTrainIcons(trainInfo);
+            }
+            else
+            {
+                return null;
+            }
         }
 
         private Geometry CalculateTrainMovement(Feature feature, Stopwatch stopwatch)
@@ -108,80 +172,30 @@ namespace DisplayAMap
             return nearestPointOnTrack;
         }
 
-
-        public async Task<FeatureLayer> ProcessTrainInfo(string trainInfo, MapView? mapView)
+        private async Task<Dictionary<string, Func<int, object?>>> ProcessTimetableInfo(string timeTableInfo)
         {
-            RootObject? rootObject = JsonConvert.DeserializeObject<RootObject>(trainInfo);
+            RootObject? rootObject = JsonConvert.DeserializeObject<RootObject>(timeTableInfo);
+
+            // Find the next STOP
+            var nextStop = rootObject?.Payload.Stops.FirstOrDefault(stop => stop.Status == "STOP");
 
             var attributesMapping = new Dictionary<string, Func<int, object?>>
             {
-                ["treinNummer"] = i => (Int32?)rootObject.Payload.Treinen[i].TreinNummer,
-                ["ritId"] = i => rootObject.Payload.Treinen[i].RitId,
-                ["snelheid"] = i => (double?)rootObject.Payload.Treinen[i].Snelheid,
-                ["richting"] = i => rootObject.Payload.Treinen[i].Richting
+                ["delayInSeconds"] = i => nextStop.Arrivals?[0].DelayInSeconds,
+                ["plannedTime"] = i => nextStop.Arrivals?[0].PlannedTime,
+                ["actualTime"] = i => nextStop.Arrivals?[0].ActualTime,
+                ["cancelled"] = i => nextStop.Arrivals?[0].Cancelled.ToString(),
+                ["crowdForecast"] = i => nextStop.Arrivals?[0].CrowdForecast,
+                ["numberOfSeats"] = i => nextStop.ActualStock?.NumberOfSeats,
+                // Add more attributes as needed
             };
 
-            FeatureLayer? layer = _featureTable.Layer as FeatureLayer;
-
-            for (int i = 0; i < rootObject.Payload.Treinen.Count; i++)
-            {
-                var attributes = attributesMapping.ToDictionary(kv => kv.Key, kv => kv.Value(i));
-
-                double lat = Convert.ToDouble(rootObject.Payload.Treinen[i].Lat);
-                double lng = Convert.ToDouble(rootObject.Payload.Treinen[i].Lng);
-                MapPoint pointGeometry = new MapPoint(lng, lat, SpatialReferences.Wgs84);
-
-                Feature? feature;
-
-                if (layer == null)
-                {
-                    // Layer doesn't exist, create new features
-                    feature = _featureTable.CreateFeature(attributes, pointGeometry);
-                    feature.SetAttributeValue("clicked", "false");
-
-                    // Add the feature to the feature table.
-                    await _featureTable.AddFeatureAsync(feature);
-                }
-                else
-                {
-                    // Layer exists, update existing features
-                    QueryParameters query = new QueryParameters
-                    {
-                        WhereClause = $"treinNummer = {rootObject.Payload.Treinen[i].TreinNummer}"
-                    };
-
-                    var result = await _featureTable.QueryFeaturesAsync(query);
-
-                    feature = result.FirstOrDefault();
-
-                    if (feature != null)
-                    {
-                        foreach (var attribute in attributes)
-                        {
-                            feature.Attributes[attribute.Key] = attribute.Value;
-                        }
-                        feature.Geometry = pointGeometry;
-                        if (ClickedFeature(feature))
-                        {
-                            await AdjustGraphics(feature, mapView);
-                        }
-                        await layer.FeatureTable.UpdateFeatureAsync(feature);
-                    }
-                }
-            }
-            if (layer == null)
-            {
-                return await LayerHandler.CreateTrainIcons(trainInfo);
-            }
-            else
-            {
-                return null;
-            }
+            return attributesMapping;
         }
 
         private async Task AdjustGraphics(Feature feature, MapView? mapView)
         {
-            await mapView.Dispatcher.InvokeAsync(async () => 
+            await mapView.Dispatcher.InvokeAsync(async () =>
             {
                 GraphicsOverlay? graphicsOverlay = mapView.GraphicsOverlays.FirstOrDefault();
                 GraphicCollection graphics = graphicsOverlay.Graphics;
@@ -206,16 +220,9 @@ namespace DisplayAMap
             });
         }
 
-        private bool ClickedFeature(Feature feature)
+        private Feature? ClickedFeature(FeatureQueryResult? features)
         {
-            if (feature.Attributes["clicked"]?.ToString() == "true")
-            {
-                return true;
-            }
-            else
-            {
-                return false;
-            }
+            return features.Any(feature => feature.Attributes["clicked"]?.ToString() == "true") ? features.FirstOrDefault(feature => feature.Attributes["clicked"].ToString() == "true") : null;    
         }
     }
 }

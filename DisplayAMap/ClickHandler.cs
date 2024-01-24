@@ -12,41 +12,32 @@ namespace DisplayAMap
         {
             // Identify features at the clicked location
             IReadOnlyList<IdentifyLayerResult> identifyResults = await mainMapView.IdentifyLayersAsync(e.Position, 5, false);
-            IdentifyLayerResult? result = identifyResults.FirstOrDefault();
-            foreach (Layer? layer in mainMapView.Map.AllLayers)
+            IdentifyLayerResult? result = identifyResults.FirstOrDefault(layer => layer.LayerContent.Name == "Treintjes");
+
+            FeatureLayer featureLayer = (FeatureLayer)result.LayerContent;
+            // Check if there are any identification results
+            if (result != null)
             {
-                if (layer.Name == "Treintjes" && layer is FeatureLayer featureLayer)
+                var features = await featureLayer.FeatureTable.QueryFeaturesAsync(new QueryParameters() { WhereClause = "1=1" });
+
+                Feature? clickedFeature = result.GeoElements.First() as Feature;
+                Feature? previouslyClicked = features.FirstOrDefault(feature => feature.Attributes["clicked"] == "true");
+
+                // Check if the clicked feature belongs to the FeatureLayer
+                if (clickedFeature != null && clickedFeature.FeatureTable == featureLayer.FeatureTable)
                 {
-                    // Check if there are any identification results
-                    if (result != null)
-                    {
-                        var features = await featureLayer.FeatureTable.QueryFeaturesAsync(new QueryParameters() { WhereClause = "1=1" });
-
-                        Feature? clickedFeature = result.GeoElements.First() as Feature;
-                        foreach (var feature in features)
-                        {
-                            feature.Attributes["clicked"] = "false";
-                            await featureLayer.FeatureTable.UpdateFeatureAsync(feature);
-                        }
-
-                        // Check if the clicked feature belongs to the FeatureLayer
-                        if (clickedFeature != null && clickedFeature.FeatureTable == featureLayer.FeatureTable)
-                        {
-                            CreateNewGraphicsOverlay(clickedFeature, mainMapView);
-                            clickedFeature.SetAttributeValue("clicked", "true");
-                        }
-                        if (mainMapView.GraphicsOverlays.Count > 1)
-                        {
-                            mainMapView.GraphicsOverlays.RemoveAt(0);
-                        }
-                        await featureLayer.FeatureTable.UpdateFeatureAsync(clickedFeature);
-                    }
+                    CreateNewGraphicsOverlay(clickedFeature, mainMapView);
+                    clickedFeature.SetAttributeValue("clicked", "true");
                 }
+                if (mainMapView.GraphicsOverlays.Count > 1)
+                {
+                    mainMapView.GraphicsOverlays.RemoveAt(0);
+                }
+                await featureLayer.FeatureTable.UpdateFeatureAsync(clickedFeature);
             }
-
         }
 
-        public static void CreateNewGraphicsOverlay(Feature feature, MapView mainMapView) 
+        public static void CreateNewGraphicsOverlay(Feature feature, MapView mainMapView)
         {
             GraphicsOverlay graphicsOverlay = new GraphicsOverlay();
 
@@ -81,3 +72,4 @@ namespace DisplayAMap
         }
     }
 }
+
