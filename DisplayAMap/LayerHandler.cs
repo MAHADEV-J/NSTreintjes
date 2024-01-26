@@ -94,9 +94,7 @@ namespace DisplayAMap
             // FieldType.OID is the primary key of the SQLite table.
             // FieldType.Date is a date column used to store a Calendar date.
             // FieldDescriptions can be a SHORT, INTEGER, GUID, FLOAT, DOUBLE, DATE, TEXT, OID, GLOBALID, BLOB, GEOMETRY, RASTER, or XML.
-            tableDescription.FieldDescriptions.Add(new FieldDescription("oid", FieldType.OID));
-            tableDescription.FieldDescriptions.Add(new FieldDescription("treinNummer", FieldType.Int32));
-            tableDescription.FieldDescriptions.Add(new FieldDescription("ritId", FieldType.Text));
+            tableDescription.FieldDescriptions.Add(new FieldDescription("oid", FieldType.Int32));
             tableDescription.FieldDescriptions.Add(new FieldDescription("snelheid", FieldType.Float64));
             tableDescription.FieldDescriptions.Add(new FieldDescription("richting", FieldType.Float64));
             tableDescription.FieldDescriptions.Add(new FieldDescription("clicked", FieldType.Text));
@@ -106,6 +104,7 @@ namespace DisplayAMap
             tableDescription.FieldDescriptions.Add(new FieldDescription("cancelled", FieldType.Text)); // Assuming Cancelled is a boolean
             tableDescription.FieldDescriptions.Add(new FieldDescription("crowdForecast", FieldType.Text));
             tableDescription.FieldDescriptions.Add(new FieldDescription("numberOfSeats", FieldType.Int32));
+            tableDescription.FieldDescriptions.Add(new FieldDescription("nextStop", FieldType.Text));
 
             // Add a new table to the geodatabase by creating one from the table description.
             _featureTable = await _geodatabase.CreateTableAsync(tableDescription);

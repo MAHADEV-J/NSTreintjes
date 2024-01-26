@@ -5,6 +5,7 @@ using System.Runtime.CompilerServices;
 using Esri.ArcGISRuntime.UI.Controls;
 using static DisplayAMap.MainWindow;
 using Esri.ArcGISRuntime.Data;
+using Esri.ArcGISRuntime.Geometry;
 
 
 namespace DisplayAMap
@@ -21,25 +22,44 @@ namespace DisplayAMap
 
         public MapViewModel()
         {
+            // Set up static class instances for our supporting classes.
             _data = new DataHandler();
             _layer = new LayerHandler();
             _click = new ClickHandler();
             _query = new QueryParameters() { WhereClause = "1=1" };
+
+            //Start the main process, using information from the NS API
             SetupMap(NSAPICalls.GetTrainData());
         }
 
         private async void SetupMap(string trainInfo)
         {
-            Map = new Map(BasemapStyle.ArcGISTopographic);
+            // Set basemap
+            _map = new Map(BasemapStyle.ArcGISTopographic);
+
+            // Check if GDB exists. If GDB doesn't exist: Create GDB and train feature table. If GDB exists: Delete train feature table (we have fresh data) 
             await _layer.CreateOrPurgeGeodatabase();
+
+            // Process the fresh data from the API into a layer
             _trains = await _data.ProcessTrainInfo(trainInfo, null, null);
+
+            // Check if the track feature layer exists within the GDB. If doesn't exist: Call the NS API and create it. If it does exist: Load it.
             _tracks = await _layer.CreateOrFetchTracks();
-            Map.OperationalLayers.Add(_tracks);
-            Map.OperationalLayers.Add(_trains);
+
+            // Add both layers to our Map
+            _map.OperationalLayers.Add(_tracks);
+            _map.OperationalLayers.Add(_trains);
+
+            // Set a (protected) copy of the MapView from the Main.
             _mainMapView = CopyMainMapView.Copy;
-            MainMapView.GeoViewTapped += (sender, e) => _click.MyFeatureLayer_GeoViewTapped(sender, e, MainMapView, Map);
-            // To display the map, set the MapViewModel.Map property, which is bound to the map view.
-            this.Map = Map;
+
+            // Set the initial viewpoint to focus on the Netherlands
+            Envelope netherlandsExtent = new Envelope(3.314971, 50.803721, 7.092536, 53.510403, SpatialReferences.Wgs84);
+            Viewpoint initialViewpoint = new Viewpoint(netherlandsExtent);
+            _mainMapView.SetViewpoint(initialViewpoint);
+
+            // We need the MapView to assign it a click event that fires every time the map is clicked.
+            _mainMapView.GeoViewTapped += (sender, e) => _click.MyFeatureLayer_GeoViewTapped(sender, e, MainMapView, _query);
 
             // Everything is prepared, time to kick off the main repeating function responsible for making the trains move
             SetupRepeatingTaskTimer();

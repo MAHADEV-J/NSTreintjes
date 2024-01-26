@@ -9,7 +9,7 @@ using System.Windows;
 using Esri.ArcGISRuntime.UI;
 using System.Diagnostics;
 using Esri.ArcGISRuntime.Symbology;
-using static DisplayAMap.DataHandlerSupportClasses;
+using static DisplayAMap.ClassAbstractions;
 using System.Linq;
 
 namespace DisplayAMap
@@ -35,24 +35,24 @@ namespace DisplayAMap
                 }
                 else
                 {
-// Materialize trainFeatures into a list
-            List<Feature> trainFeaturesList = trainFeatures.ToList();
+                    // Materialize trainFeatures into a list
+                    List<Feature> trainFeaturesList = trainFeatures.ToList();
 
-            Feature? featureClicked = ClickedFeature(trainFeatures);
-            foreach (var feature in trainFeaturesList)
-            {
-                feature.Geometry = AdjustTrainToTrack(trackFeatures, CalculateTrainMovement(feature, stopwatch));
+                    Feature? featureClicked = ClickedFeature(trainFeatures);
+                    foreach (var feature in trainFeaturesList)
+                    {
+                        feature.Geometry = AdjustTrainToTrack(trackFeatures, CalculateTrainMovement(feature, stopwatch));
 
-                if (featureClicked != null && featureClicked == feature)
-                {
-                    await AdjustGraphics(feature, mapView);
-                }
+                        if (featureClicked != null && featureClicked == feature)
+                        {
+                            await AdjustGraphics(feature, mapView);
+                        }
 
-                stopwatch.Restart();
-            }
+                        stopwatch.Restart();
+                    }
 
-            // Use Dispatcher.InvokeAsync to update UI components
-            await trainLayer.FeatureTable.UpdateFeaturesAsync(trainFeaturesList);
+                    // Use Dispatcher.InvokeAsync to update UI components
+                    await trainLayer.FeatureTable.UpdateFeaturesAsync(trainFeaturesList);
                 }
                 if (fetchCounter == 5)
                 {
@@ -66,13 +66,15 @@ namespace DisplayAMap
         {
             Feature? feature;
             FeatureQueryResult? trainFeatures = trainLayer?.FeatureTable?.QueryFeaturesAsync(new QueryParameters() { WhereClause = "1=1" }).Result;
+
+
             Feature? featureClicked = (trainFeatures == null) ? null : ClickedFeature(trainFeatures);
+
             RootObject? rootObject = JsonConvert.DeserializeObject<RootObject>(trainInfo);
 
             var attributesMapping = new Dictionary<string, Func<int, object?>>
             {
-                ["treinNummer"] = i => (Int32?)rootObject.Payload.Treinen[i].TreinNummer,
-                ["ritId"] = i => rootObject.Payload.Treinen[i].RitId,
+                ["oid"] = i => (Int32?)rootObject.Payload.Treinen[i].TreinNummer,
                 ["snelheid"] = i => (double?)rootObject.Payload.Treinen[i].Snelheid,
                 ["richting"] = i => rootObject.Payload.Treinen[i].Richting
             };
@@ -82,13 +84,6 @@ namespace DisplayAMap
                 double lat = Convert.ToDouble(rootObject.Payload.Treinen[i].Lat);
                 double lng = Convert.ToDouble(rootObject.Payload.Treinen[i].Lng);
                 MapPoint pointGeometry = new MapPoint(lng, lat, SpatialReferences.Wgs84);
-
-
-                var timetable = await ProcessTimetableInfo(await NSAPICalls.GetTimetableData(rootObject?.Payload.Treinen[i].TreinNummer.ToString()));
-
-                attributesMapping = attributesMapping
-                    .Concat(timetable.Where(kv => !attributesMapping.ContainsKey(kv.Key)))
-                    .ToDictionary(kv => kv.Key, kv => kv.Value);
 
                 var attributes = attributesMapping.ToDictionary(kv => kv.Key, kv => kv.Value(i));
 
@@ -106,7 +101,7 @@ namespace DisplayAMap
                     // Layer exists, update existing features
                     QueryParameters query = new QueryParameters
                     {
-                        WhereClause = $"treinNummer = {rootObject.Payload.Treinen[i].TreinNummer}"
+                        WhereClause = $"oid = {rootObject.Payload.Treinen[i].TreinNummer}"
                     };
 
                     var result = await _featureTable.QueryFeaturesAsync(query);
@@ -120,7 +115,7 @@ namespace DisplayAMap
                             feature.Attributes[attribute.Key] = attribute.Value;
                         }
                         feature.Geometry = pointGeometry;
-                        if (featureClicked == null);
+                        if (featureClicked != null) ;
                         {
                             if (featureClicked.Attributes["oid"] == feature.Attributes["oid"])
                             {
@@ -172,21 +167,22 @@ namespace DisplayAMap
             return nearestPointOnTrack;
         }
 
-        private async Task<Dictionary<string, Func<int, object?>>> ProcessTimetableInfo(string timeTableInfo)
+        internal static async Task<Dictionary<string, object?>> ProcessTimetableInfo(string timeTableInfo)
         {
             RootObject? rootObject = JsonConvert.DeserializeObject<RootObject>(timeTableInfo);
 
             // Find the next STOP
             var nextStop = rootObject?.Payload.Stops.FirstOrDefault(stop => stop.Status == "STOP");
 
-            var attributesMapping = new Dictionary<string, Func<int, object?>>
+            var attributesMapping = new Dictionary<string, object?>
             {
-                ["delayInSeconds"] = i => nextStop.Arrivals?[0].DelayInSeconds,
-                ["plannedTime"] = i => nextStop.Arrivals?[0].PlannedTime,
-                ["actualTime"] = i => nextStop.Arrivals?[0].ActualTime,
-                ["cancelled"] = i => nextStop.Arrivals?[0].Cancelled.ToString(),
-                ["crowdForecast"] = i => nextStop.Arrivals?[0].CrowdForecast,
-                ["numberOfSeats"] = i => nextStop.ActualStock?.NumberOfSeats,
+                ["delayInSeconds"] = nextStop.Arrivals?[0].DelayInSeconds,
+                ["plannedTime"] = DateTime.Parse(nextStop.Arrivals?[0].PlannedTime).ToString("HH:mm:ss"),
+                ["actualTime"] = DateTime.Parse(nextStop.Arrivals?[0].ActualTime).ToString("HH:mm:ss"),
+                ["cancelled"] = nextStop.Arrivals?[0].Cancelled.ToString(),
+                ["crowdForecast"] = nextStop.Arrivals?[0].CrowdForecast,
+                ["numberOfSeats"] = nextStop.ActualStock?.NumberOfSeats,
+                ["nextStop"] = nextStop.Arrivals?[0].Destination.Name
                 // Add more attributes as needed
             };
 
@@ -204,7 +200,7 @@ namespace DisplayAMap
                 var textSymbolGraphic = graphics.FirstOrDefault(graphic => graphic.Symbol is TextSymbol);
                 if (textSymbolGraphic?.Symbol is TextSymbol textSymbol)
                 {
-                    textSymbol.Text = "Richting: " + feature.Attributes["richting"].ToString() + "\nSnelheid: " + Math.Round((double)feature.Attributes["snelheid"], 2) + "\nTreinnummer: " + feature.Attributes["treinNummer"].ToString() + "\n Rit id: " + feature.Attributes["ritId"];
+                    textSymbol.Text = "Richting: " + feature.Attributes["richting"].ToString() + "\nSnelheid: " + Math.Round((double)feature.Attributes["snelheid"], 2) + "\noid: " + feature.Attributes["oid"].ToString();
                 }
                 Graphic table = graphicsOverlay.Graphics.FirstOrDefault(graphic => graphic.Symbol is SimpleMarkerSymbol);
                 Graphic textGraphic = graphicsOverlay.Graphics.FirstOrDefault(graphic => graphic.Symbol is TextSymbol);
@@ -222,7 +218,7 @@ namespace DisplayAMap
 
         private Feature? ClickedFeature(FeatureQueryResult? features)
         {
-            return features.Any(feature => feature.Attributes["clicked"]?.ToString() == "true") ? features.FirstOrDefault(feature => feature.Attributes["clicked"].ToString() == "true") : null;    
+            return features.Any(feature => feature.Attributes["clicked"]?.ToString() == "true") ? features.FirstOrDefault(feature => feature.Attributes["clicked"].ToString() == "true") : null;
         }
     }
 }

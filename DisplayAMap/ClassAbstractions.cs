@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace DisplayAMap
 {
-    internal class DataHandlerSupportClasses
+    internal class ClassAbstractions
     {
         public class TrainInfo
         {
