@@ -10,6 +10,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Esri.ArcGISRuntime.Symbology;
+using System.Drawing;
+using System.Diagnostics;
 
 namespace DisplayAMap
 {
@@ -17,7 +19,39 @@ namespace DisplayAMap
     {
         private string? _gdbPath;
         private string? _directoryPath;
+        static int i = 0;
 
+        internal static async Task ChangeFeatureIcon(Feature feature, FeatureLayer layer, string color)
+        {
+            try
+            {
+                // Get the base directory of the application
+                string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
+
+                // Combine the base directory with the relative path to your custom icon
+                string iconRelativePath = "TrainIcon" + color + ".png";
+                string iconPath = Path.Combine(baseDirectory, iconRelativePath);
+                feature.Attributes["color"] = color;
+                PictureMarkerSymbol customSymbol = new PictureMarkerSymbol(new Uri(iconPath));
+
+                UniqueValueRenderer renderer = (UniqueValueRenderer)layer.Renderer;
+
+                lock (renderer.UniqueValues)
+                {
+                    if (!renderer.UniqueValues.Any(uv => uv.Label == color))
+                    {
+                        renderer.UniqueValues.Add(new UniqueValue("color", color, customSymbol, color));
+                    }
+                }
+                Debug.WriteLine(i + "Aantal wel goed");
+                layer.FeatureTable.UpdateFeatureAsync(feature);
+                i++;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine(ex.Message);
+            }
+        }
 
         internal static async Task<FeatureLayer> CreateTrainIcons(string trainInfo)
         {
@@ -30,7 +64,9 @@ namespace DisplayAMap
 
             PictureMarkerSymbol customSymbol = new PictureMarkerSymbol(new Uri(iconPath));
             // Create a SimpleRenderer with the custom symbol
-            SimpleRenderer renderer = new SimpleRenderer(customSymbol);
+            UniqueValueRenderer renderer = new UniqueValueRenderer();
+            renderer.DefaultSymbol = customSymbol;
+            renderer.FieldNames.Add("color");
             return new FeatureLayer(_featureTable) { Name = "Treintjes", Renderer = renderer };
         }
 
@@ -95,6 +131,7 @@ namespace DisplayAMap
             // FieldType.Date is a date column used to store a Calendar date.
             // FieldDescriptions can be a SHORT, INTEGER, GUID, FLOAT, DOUBLE, DATE, TEXT, OID, GLOBALID, BLOB, GEOMETRY, RASTER, or XML.
             tableDescription.FieldDescriptions.Add(new FieldDescription("oid", FieldType.Int32));
+            tableDescription.FieldDescriptions.Add(new FieldDescription("color", FieldType.Text));
             tableDescription.FieldDescriptions.Add(new FieldDescription("snelheid", FieldType.Float64));
             tableDescription.FieldDescriptions.Add(new FieldDescription("richting", FieldType.Float64));
             tableDescription.FieldDescriptions.Add(new FieldDescription("clicked", FieldType.Text));

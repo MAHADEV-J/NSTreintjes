@@ -74,12 +74,13 @@ namespace DisplayAMap
 
             // Create a text symbol to display attribute information
             IDictionary<string, object?> arr = feature.Attributes;
+
             TextSymbol leftTextSymbol = new TextSymbol
             {
                 Color = System.Drawing.Color.Black,
                 Size = 12,
                 FontFamily = "Arial",
-                Text = "Richting:\nSnelheid:\nTreinnummer:\n" + TextHandler.PlacenameHandler(extraInfo["nextStop"].ToString(), 0) + "\nVertraging in \nseconden:\nGeplande tijd\naankomst:\nActuele tijd\naankomst:\nDrukte trein:",
+                Text = "Richting:\nSnelheid:\nTreinnummer:\n" + TextHandler.PlacenameHandler(feature.Attributes["nextStop"].ToString(), 0) + "\nVertraging in \nseconden:\nGeplande tijd\naankomst:\nActuele tijd\naankomst:\nDrukte trein:",
                 Angle = 0,
                 OffsetY = 130,
                 OffsetX = -80,
@@ -91,12 +92,20 @@ namespace DisplayAMap
                 Color = System.Drawing.Color.Black,
                 Size = 12,
                 FontFamily = "Arial",
-                Text = arr["richting"] + "\n" + Math.Round((double)arr["snelheid"], 2) + "\n" + arr["oid"] + "\n" + TextHandler.PlacenameHandler(extraInfo["nextStop"].ToString(), 1) + "\n" + extraInfo["delayInSeconds"] + "\n\n" + extraInfo["plannedTime"] + "\n\n" + extraInfo["actualTime"] + "\n\n" + extraInfo["crowdForecast"],
                 Angle = 0,
                 OffsetY = 130,
                 OffsetX = 80,
                 HorizontalAlignment = HorizontalAlignment.Right,
             };
+
+            if (feature.Attributes["nextStop"] != null)
+            {
+                rightTextSymbol.Text = arr["richting"] + "\n" + Math.Round((double)arr["snelheid"], 2) + "\n" + arr["oid"] + "\n" + TextHandler.PlacenameHandler(feature.Attributes["nextStop"].ToString(), 1) + "\n" + feature.Attributes["delayInSeconds"] + "\n\n" + feature.Attributes["plannedTime"] + "\n\n" + feature.Attributes["actualTime"] + "\n\n" + feature.Attributes["crowdForecast"];
+            }
+            else
+            {
+                rightTextSymbol.Text = arr["richting"] + "\n" + Math.Round((double)arr["snelheid"], 2) + "\n" + arr["oid"] + "\nEindhalte bereikt\nN.v.T\n\nN.v.t.\n\nN.v.t.\n\nN.v.t.";
+            }
 
             // Create a text graphic with attribute information
             Graphic leftTextGraphic = new Graphic(feature.Geometry, leftTextSymbol);

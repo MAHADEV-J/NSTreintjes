@@ -11,6 +11,7 @@ using System.Diagnostics;
 using Esri.ArcGISRuntime.Symbology;
 using static DisplayAMap.ClassAbstractions;
 using System.Linq;
+using System.Windows.Documents;
 
 namespace DisplayAMap
 {
@@ -20,8 +21,9 @@ namespace DisplayAMap
         internal static GeodatabaseFeatureTable? _featureTable;
         internal static Geodatabase? _geodatabase;
         int fetchCounter = 0;
+        static int i = 0;
 
-        public async Task KeepUpdatingTrains(object? state, FeatureLayer trainLayer, FeatureQueryResult trainFeatures, FeatureQueryResult trackFeatures, MapView mapView)
+        public async Task KeepUpdatingTrainPosition(object? state, FeatureLayer trainLayer, FeatureQueryResult trainFeatures, FeatureQueryResult trackFeatures, MapView mapView)
         {
             await Task.Run(async () =>
             {
@@ -37,22 +39,18 @@ namespace DisplayAMap
                 {
                     // Materialize trainFeatures into a list
                     List<Feature> trainFeaturesList = trainFeatures.ToList();
-
                     Feature? featureClicked = ClickedFeature(trainFeatures);
                     foreach (var feature in trainFeaturesList)
                     {
                         feature.Geometry = AdjustTrainToTrack(trackFeatures, CalculateTrainMovement(feature, stopwatch));
-
-                        if (featureClicked != null && featureClicked == feature)
+                        if (featureClicked != null && featureClicked.Attributes["oid"].Equals(feature?.Attributes["oid"]))
                         {
-                            await AdjustGraphics(feature, mapView);
+                            await AdjustClickedGraphics(feature, mapView);
                         }
-
+                        feature.Attributes.Remove("color");
                         stopwatch.Restart();
+                        await trainLayer.FeatureTable.UpdateFeatureAsync(feature);
                     }
-
-                    // Use Dispatcher.InvokeAsync to update UI components
-                    await trainLayer.FeatureTable.UpdateFeaturesAsync(trainFeaturesList);
                 }
                 if (fetchCounter == 5)
                 {
@@ -60,6 +58,37 @@ namespace DisplayAMap
                 }
             });
             fetchCounter++;
+        }
+
+        internal async Task ProcessFeature(Feature feature, FeatureLayer trainLayer)
+        {
+            RootObject? rootObject = JsonConvert.DeserializeObject<RootObject>(await NSAPICalls.GetTimetableData(feature.Attributes["oid"].ToString()));
+
+            // Find the next STOP
+            var nextStop = rootObject?.Payload?.Stops?.FirstOrDefault(stop => stop.Status == "STOP");
+
+            int? delayInSeconds = nextStop?.Arrivals?[0]?.DelayInSeconds ?? null;
+
+            if (delayInSeconds == 0)
+            {
+                await LayerHandler.ChangeFeatureIcon(feature, trainLayer, "Green");
+            }
+            if (delayInSeconds >= 1 && delayInSeconds <= 300)
+            {
+                await LayerHandler.ChangeFeatureIcon(feature, trainLayer, "Chartreuse");
+            }
+            if (delayInSeconds > 300 && delayInSeconds <= 600)
+            {
+                await LayerHandler.ChangeFeatureIcon(feature, trainLayer, "Yellow");
+            }
+            if (delayInSeconds > 600 && delayInSeconds <= 1800)
+            {
+                await LayerHandler.ChangeFeatureIcon(feature, trainLayer, "Orange");
+            }
+            if (delayInSeconds > 1800)
+            {
+                await LayerHandler.ChangeFeatureIcon(feature, trainLayer, "Red");
+            }
         }
 
         public async Task<FeatureLayer> ProcessTrainInfo(string trainInfo, MapView? mapView, FeatureLayer? trainLayer)
@@ -112,15 +141,15 @@ namespace DisplayAMap
                     {
                         foreach (var attribute in attributes)
                         {
-                            feature.Attributes[attribute.Key] = attribute.Value;
+                            if (attribute.Key != "color")
+                            {
+                                feature.Attributes[attribute.Key] = attribute.Value;
+                            }
                         }
                         feature.Geometry = pointGeometry;
-                        if (featureClicked != null) ;
+                        if (featureClicked != null && featureClicked.Attributes["oid"].Equals(feature?.Attributes["oid"]))
                         {
-                            if (featureClicked.Attributes["oid"] == feature.Attributes["oid"])
-                            {
-                                await AdjustGraphics(feature, mapView);
-                            }
+                            await AdjustClickedGraphics(feature, mapView);
                         }
                         await trainLayer.FeatureTable.UpdateFeatureAsync(feature);
                     }
@@ -157,7 +186,7 @@ namespace DisplayAMap
         {
             // Order track features by distance to the new train location
             Feature? nearestTrackFeature = features
-                .Where(trackFeature => GeometryEngine.Distance(newGeometry, trackFeature.Geometry) <= 5)
+                .Where(trackFeature => GeometryEngine.Distance(newGeometry, trackFeature.Geometry) <= 15)
                 .OrderBy(trackFeature => GeometryEngine.Distance(newGeometry, trackFeature.Geometry)).First();
 
             // Find the nearest coordinate on the track to the new train location
@@ -176,42 +205,47 @@ namespace DisplayAMap
 
             var attributesMapping = new Dictionary<string, object?>
             {
-                ["delayInSeconds"] = nextStop.Arrivals?[0].DelayInSeconds,
-                ["plannedTime"] = DateTime.Parse(nextStop.Arrivals?[0].PlannedTime).ToString("HH:mm:ss"),
-                ["actualTime"] = DateTime.Parse(nextStop.Arrivals?[0].ActualTime).ToString("HH:mm:ss"),
-                ["cancelled"] = nextStop.Arrivals?[0].Cancelled.ToString(),
-                ["crowdForecast"] = nextStop.Arrivals?[0].CrowdForecast,
-                ["numberOfSeats"] = nextStop.ActualStock?.NumberOfSeats,
-                ["nextStop"] = nextStop.Arrivals?[0].Destination.Name
-                // Add more attributes as needed
+                ["delayInSeconds"] = nextStop?.Arrivals?[0]?.DelayInSeconds,
+                ["plannedTime"] = DateTime.TryParse(nextStop?.Arrivals?[0]?.PlannedTime, out DateTime plannedTime) ? plannedTime.ToString("HH:mm:ss") : null,
+                ["actualTime"] = DateTime.TryParse(nextStop?.Arrivals?[0]?.ActualTime, out DateTime actualTime) ? actualTime.ToString("HH:mm:ss") : null,
+                ["cancelled"] = nextStop?.Arrivals?[0]?.Cancelled.ToString(),
+                ["crowdForecast"] = nextStop?.Arrivals?[0]?.CrowdForecast,
+                ["numberOfSeats"] = nextStop?.ActualStock?.NumberOfSeats,
+                ["nextStop"] = nextStop?.Arrivals?[0]?.Destination?.Name
             };
 
             return attributesMapping;
         }
 
-        private async Task AdjustGraphics(Feature feature, MapView? mapView)
+        private async Task AdjustClickedGraphics(Feature feature, MapView? mapView)
         {
             await mapView.Dispatcher.InvokeAsync(async () =>
             {
+                var extraInfo = await ProcessTimetableInfo(await NSAPICalls.GetTimetableData(feature.Attributes["oid"].ToString()));
+
+                foreach (var attrib in extraInfo)
+                {
+                    feature.Attributes[attrib.Key] = attrib.Value;
+                }
+
                 GraphicsOverlay? graphicsOverlay = mapView.GraphicsOverlays.FirstOrDefault();
                 GraphicCollection graphics = graphicsOverlay.Graphics;
 
                 // Find the TextSymbol and update its text
-                var textSymbolGraphic = graphics.FirstOrDefault(graphic => graphic.Symbol is TextSymbol);
-                if (textSymbolGraphic?.Symbol is TextSymbol textSymbol)
+                var leftTextSymbol = graphics.FirstOrDefault(graphic => graphic.Symbol is TextSymbol && ((TextSymbol)graphic.Symbol).Text.Contains("Richting", StringComparison.OrdinalIgnoreCase));
+                if (leftTextSymbol?.Symbol is TextSymbol leftText)
                 {
-                    textSymbol.Text = "Richting: " + feature.Attributes["richting"].ToString() + "\nSnelheid: " + Math.Round((double)feature.Attributes["snelheid"], 2) + "\noid: " + feature.Attributes["oid"].ToString();
+                    leftText.Text = "Richting:\nSnelheid:\nTreinnummer:\n" + TextHandler.PlacenameHandler(extraInfo["nextStop"].ToString(), 0) + "\nVertraging in \nseconden:\nGeplande tijd\naankomst:\nActuele tijd\naankomst:\nDrukte trein:";
                 }
-                Graphic table = graphicsOverlay.Graphics.FirstOrDefault(graphic => graphic.Symbol is SimpleMarkerSymbol);
-                Graphic textGraphic = graphicsOverlay.Graphics.FirstOrDefault(graphic => graphic.Symbol is TextSymbol);
-                (table.Geometry, textGraphic.Geometry) = (feature.Geometry, feature.Geometry);
-
-                // Iterate through all graphics in the overlay
-
-                graphicsOverlay.Graphics.Clear();
-
-                graphicsOverlay.Graphics.Add(table);
-                graphicsOverlay.Graphics.Add(textGraphic);
+                var rightTextSymbol = graphics.FirstOrDefault(graphic => graphic.Symbol is TextSymbol && !((TextSymbol)graphic.Symbol).Text.Contains("richting", StringComparison.OrdinalIgnoreCase));
+                if (rightTextSymbol?.Symbol is TextSymbol rightText)
+                {
+                    rightText.Text = feature.Attributes["richting"] + "\n" + Math.Round((double)feature.Attributes["snelheid"], 2) + "\n" + feature.Attributes["oid"] + "\n" + TextHandler.PlacenameHandler(extraInfo["nextStop"].ToString(), 1) + "\n" + extraInfo["delayInSeconds"] + "\n\n" + extraInfo["plannedTime"] + "\n\n" + extraInfo["actualTime"] + "\n\n" + extraInfo["crowdForecast"];
+                }
+                foreach (Graphic graphic in graphics)
+                {
+                    graphic.Geometry = feature.Geometry;
+                }
                 mapView.UpdateLayout();
             });
         }

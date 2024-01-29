@@ -2,11 +2,13 @@
 using System.Windows;
 using System.Net;
 using Esri.ArcGISRuntime.Data;
+using System.Diagnostics;
 
 namespace DisplayAMap
 {
     class NSAPICalls
     {
+        static int i = 0;
         private static readonly HttpClient httpClient = new HttpClient();
         private static HttpRequestMessage CreateHttpRequestMessage()
         {
@@ -81,7 +83,11 @@ namespace DisplayAMap
 
             // Send GET request
             HttpResponseMessage response = httpClient.SendAsync(httpRequest).Result;
-
+            if (response.StatusCode.ToString() != "OK")
+            {
+                Debug.WriteLine(i + "TE SNEL");
+                i++;
+            }
             return await response.Content.ReadAsStringAsync();
         }
     }
